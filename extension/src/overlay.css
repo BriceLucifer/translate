@@ -19,9 +19,9 @@
   word-break: break-word;
 }
 
-/* 译文（下行）：主字幕，大字号 */
+/* 译文（下行）：主字幕，中:英 = 6:4 */
 #live-subtitles-overlay .ls-trans {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 600;
   color: #fff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
@@ -55,9 +55,9 @@
   background-color: rgba(255, 255, 255, 0.85);
 }
 
-/* 原文（上行）：副字幕，小字号 */
+/* 原文（上行）：副字幕，英:中 = 4:6 */
 #live-subtitles-overlay .ls-orig {
-  font-size: 17px;
+  font-size: 16px;
   color: rgba(255, 255, 255, 0.82);
 }
 
