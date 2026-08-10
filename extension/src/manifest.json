@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Live Subtitles (Whisper)",
+  "version": "0.1.0",
+  "description": "Tab audio -> local vLLM Whisper -> real-time subtitle overlay",
+  "permissions": ["tabCapture", "offscreen", "tabs", "storage", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Live Subtitles" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

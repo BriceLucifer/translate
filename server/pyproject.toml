@@ -1,0 +1,9 @@
+[project]
+name = "stt-server"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "httpx>=0.28.1",
+    "numpy>=2.5.2",
+    "websockets>=17.0.1",
+]

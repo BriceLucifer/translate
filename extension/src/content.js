@@ -1,0 +1,65 @@
+// Content script：字幕浮层。支持双语显示与视频全屏（fullscreenchange 时把节点挂进 Top Layer）。
+
+const OVERLAY_ID = 'live-subtitles-overlay';
+let overlay = null;
+let origEl = null;
+let transEl = null;
+
+function ensureOverlay() {
+  if (overlay) return;
+  overlay = document.createElement('div');
+  overlay.id = OVERLAY_ID;
+  overlay.style.display = 'none';
+
+  transEl = document.createElement('div');
+  transEl.className = 'ls-line ls-trans';
+  origEl = document.createElement('div');
+  origEl.className = 'ls-line ls-orig';
+
+  overlay.appendChild(transEl);
+  overlay.appendChild(origEl);
+  document.documentElement.appendChild(overlay);
+
+  // 全屏时把浮层挂到全屏元素内（否则被 Top Layer 盖住）
+  document.addEventListener('fullscreenchange', () => {
+    const host = document.fullscreenElement;
+    (host || document.documentElement).appendChild(overlay);
+  });
+}
+
+function lastSentences(text, n) {
+  if (!text) return '';
+  const parts = text.split(/(?<=[。！？.!?,，、;；:：])\s*/).filter(Boolean);
+  return parts.slice(-n).join(' ');
+}
+
+function renderSubtitle(msg) {
+  ensureOverlay();
+  const orig = (lastSentences(msg.committed, 2) + ' ' + (msg.partial || '')).trim();
+  origEl.textContent = orig;
+  origEl.classList.toggle('ls-has-partial', !!msg.partial);
+
+  if (msg.committed_tr !== undefined) {
+    transEl.textContent = lastSentences(msg.committed_tr, 2);
+    transEl.style.display = transEl.textContent ? '' : 'none';
+  } else {
+    transEl.style.display = 'none';
+  }
+
+  // 原文和译文都为空时隐藏
+  overlay.style.display = (orig || transEl.textContent) ? '' : 'none';
+}
+
+function setVisible(visible) {
+  ensureOverlay();
+  overlay.style.display = visible ? '' : 'none';
+  if (!visible) {
+    origEl.textContent = '';
+    transEl.textContent = '';
+  }
+}
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'subtitle') renderSubtitle(msg);
+  if (msg.type === 'overlay') setVisible(msg.visible);
+});
