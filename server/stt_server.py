@@ -1,16 +1,15 @@
-"""实时字幕后端：WebSocket 收 PCM 音频 -> VAD 切块 -> vLLM (OpenAI 兼容接口) 转写 -> 推送字幕。
+"""实时字幕后端：WebSocket 收 PCM 音频 -> vLLM 转写（segment 时间戳断句）-> 异步翻译 -> 推送字幕。
 
-依赖一个已启动的 vLLM 转写服务，例如：
-    vllm serve openai/whisper-large-v3-turbo --task transcription
-
-可选：再启动一个 vLLM 翻译服务（如 Hunyuan MT），加 --mt-url 启用双语字幕：
-    vllm serve tencent/Hunyuan-MT-7B --port 8001
+依赖服务：
+    vllm serve openai/whisper-large-v3-turbo --port 8000
+    llama-server -hf tencent/Hy-MT2-1.8B-GGUF:Q4_K_M --port 8001 -ngl 99   # 可选，翻译
 
 协议（ws://127.0.0.1:8765）：
-  客户端 -> 文本 JSON: {"event": "start", "language": "zh"|null, "target": "zh"|null}
+  客户端 -> 文本 JSON: {"event": "start", "language": "zh"|null, "target": "zh"|""|null}
+                      （target 缺省 = 服务端 --default-target；"" = 不翻译）
   客户端 -> 二进制: 16kHz mono int16 PCM 帧
   服务端 -> 文本 JSON: {"type": "subtitle", "committed": "...", "partial": "...",
-                        "committed_tr": "..."}   # 仅在启用翻译时带 committed_tr
+                        "committed_tr": "...", "partial_tr": "..."}   # tr 字段仅启用翻译时带
 """
 
 import argparse
