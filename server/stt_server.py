@@ -33,7 +33,7 @@ BYTES_PER_SAMPLE = 2
 # 切块策略参数（秒）
 MIN_SPEECH = 0.5          # 短于此的语音段忽略
 MAX_UNCOMMITTED = 10.0    # 未提交音频上限（也是转写窗口），超出强制提交
-PARTIAL_EVERY = 1.0       # 每积累这么多新语音刷新一次
+PARTIAL_EVERY = 0.5       # 每积累这么多新语音刷新一次
 COMMIT_MARGIN = 0.5       # segment 结尾距窗口尾超过该值即视为成熟，可提交
 FORCE_MARGIN = 0.2        # 强制提交时的边距
 
@@ -70,6 +70,11 @@ class Session:
         self.committed = ""             # 已确认文本
         self.committed_tr = ""          # 已确认译文
         self.partial = ""
+        self.partial_tr = ""            # 临时字幕译文
+        self._partial_tr_src = ""       # 上次翻译过的临时字幕原文
+        self._partial_tr_task: asyncio.Task | None = None
+        self.tr_queue: asyncio.Queue = asyncio.Queue()   # 已确认文本的翻译队列（串行保序）
+        self.tr_worker: asyncio.Task | None = None
         self.new_audio_since_partial = 0.0
         self.flush_all = False          # stop 时提交全部
         self.task: asyncio.Task | None = None
@@ -84,7 +89,60 @@ class Session:
         }
         if self.mt_url and self.target:
             msg["committed_tr"] = self.committed_tr
+            msg["partial_tr"] = self.partial_tr
         await self.ws.send(json.dumps(msg, ensure_ascii=False))
+
+    def _tr_enabled(self) -> bool:
+        return bool(self.mt_url and self.target)
+
+    async def _tr_loop(self):
+        """已确认文本的翻译 worker：排队串行执行，不阻塞识别主流程。"""
+        while True:
+            text = await self.tr_queue.get()
+            try:
+                tr = await self.translate(text)
+            except Exception as e:
+                log.warning("translate failed: %s", e)
+                continue
+            if tr:
+                self.committed_tr = (self.committed_tr + " " + tr).strip() if self.committed_tr else tr
+                try:
+                    await self.send_subtitle()
+                except websockets.ConnectionClosed:
+                    return
+
+    def queue_commit_translation(self, text: str):
+        if not self._tr_enabled() or not text:
+            return
+        if self.tr_worker is None:
+            self.tr_worker = asyncio.create_task(self._tr_loop())
+        self.tr_queue.put_nowait(text)
+
+    def queue_partial_translation(self):
+        """临时字幕翻译：同一时刻只跑一个，文本没变就不翻。"""
+        if not self._tr_enabled() or not self.partial:
+            return
+        if self.partial == self._partial_tr_src:
+            return
+        if self._partial_tr_task and not self._partial_tr_task.done():
+            return
+        src = self.partial
+        self._partial_tr_src = src
+
+        async def run():
+            try:
+                tr = await self.translate(src)
+            except Exception:
+                return
+            # 结果过期（期间有了新 partial 或发生了提交）就丢弃
+            if self._partial_tr_src == src and tr:
+                self.partial_tr = tr
+                try:
+                    await self.send_subtitle()
+                except websockets.ConnectionClosed:
+                    pass
+
+        self._partial_tr_task = asyncio.create_task(run())
 
     async def transcribe(self, samples: np.ndarray) -> dict:
         data = {"model": self.model, "response_format": "verbose_json", "temperature": "0"}
@@ -171,18 +229,16 @@ class Session:
             del self.buffer[: n - n % 2]
             if text:
                 self.committed = (self.committed + " " + text).strip() if self.committed else text
-                try:
-                    tr = await self.translate(text)
-                except Exception as e:
-                    log.warning("translate failed: %s", e)
-                    tr = ""
-                if tr:
-                    self.committed_tr = (self.committed_tr + " " + tr).strip() if self.committed_tr else tr
+                self.queue_commit_translation(text)
             log.info("COMMIT: %s", text)
+            # 提交后旧临时译文作废
+            self.partial_tr = ""
+            self._partial_tr_src = ""
 
         self.partial = " ".join(s.get("text", "").strip() for s in rest).strip()
         self.new_audio_since_partial = 0.0
         await self.send_subtitle()
+        self.queue_partial_translation()
 
     async def feed(self, chunk: bytes):
         self.buffer.extend(chunk)
@@ -217,6 +273,9 @@ async def handler(ws, http, vllm_url, model, mt_url, mt_model, default_target):
     except websockets.ConnectionClosed:
         pass
     finally:
+        for t in (session.tr_worker, session._partial_tr_task):
+            if t:
+                t.cancel()
         if session.task:
             await asyncio.wait([session.task], timeout=5)
         log.info("client disconnected")

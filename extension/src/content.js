@@ -64,8 +64,10 @@ function renderSubtitle(msg) {
   origEl.classList.toggle('ls-has-partial', !!msg.partial);
 
   if (msg.committed_tr !== undefined) {
-    transEl.textContent = lastSentences(msg.committed_tr, 2);
-    transEl.style.display = transEl.textContent ? '' : 'none';
+    const tr = (lastSentences(msg.committed_tr, 2) + ' ' + (msg.partial_tr || '')).trim();
+    transEl.textContent = tr;
+    transEl.classList.toggle('ls-has-partial', !!msg.partial_tr);
+    transEl.style.display = tr ? '' : 'none';
   } else {
     transEl.style.display = 'none';
   }
