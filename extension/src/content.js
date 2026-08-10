@@ -14,7 +14,7 @@ function ensureOverlay() {
   // 拖拽手柄（浮层本身不拦截点击，只能拖这里移动）
   const grip = document.createElement('div');
   grip.className = 'ls-grip';
-  grip.textContent = '⠿';
+  grip.title = '拖动移动字幕';
   grip.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     grip.setPointerCapture(e.pointerId);
