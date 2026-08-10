@@ -37,7 +37,7 @@ MAX_UNCOMMITTED = 10.0    # 未提交音频上限，超出强制切块
 PARTIAL_EVERY = 1.0       # 每积累这么多新语音刷新一次临时字幕
 PARTIAL_MAX = 8.0         # 临时字幕最多回看这么长的音频
 
-LANG_NAMES = {"zh": "中文", "en": "英文", "ja": "日文", "ko": "韩文"}
+LANG_NAMES = {"zh": "中文", "en": "英语", "ja": "日语", "ko": "韩语"}
 
 
 def pcm_bytes_to_float(buf: bytes) -> np.ndarray:
@@ -117,7 +117,8 @@ class Session:
         if self.language and self.language == self.target:
             return text
         target_name = LANG_NAMES.get(self.target, self.target)
-        prompt = f"把下面的文本翻译成{target_name}，不要额外解释。\n\n{text}"
+        # Hy-MT2 官方默认翻译指令格式
+        prompt = f"将以下文本翻译成{target_name}，注意只需要输出翻译后的结果，不要额外解释：\n\n{text}"
         resp = await self.http.post(
             f"{self.mt_url}/v1/chat/completions",
             json={
@@ -231,7 +232,7 @@ async def main():
     parser.add_argument("--vllm", default="http://127.0.0.1:8000", help="vLLM 转写服务地址")
     parser.add_argument("--model", default="openai/whisper-large-v3-turbo")
     parser.add_argument("--mt-url", default="", help="vLLM 翻译服务地址，留空关闭翻译")
-    parser.add_argument("--mt-model", default="tencent/Hunyuan-MT-7B")
+    parser.add_argument("--mt-model", default="tencent/Hy-MT2-1.8B")
     args = parser.parse_args()
 
     http = httpx.AsyncClient(timeout=httpx.Timeout(60.0))

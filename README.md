@@ -44,11 +44,17 @@ npm run build        # 产物在 extension/dist
 
 ```bash
 # T1: 转写服务（首次会下载模型 ~3GB）
-vllm serve openai/whisper-large-v3-turbo --task transcription --port 8000
+vllm serve openai/whisper-large-v3-turbo --port 8000
 
-# T2: 翻译服务（可选，不用翻译就跳过）
-#     显存不够可换量化版或把 --gpu-memory-utilization 调小
-vllm serve tencent/Hunyuan-MT-7B --port 8001
+# WSL2 额外需要两个参数：
+#   VLLM_WSL2_ENABLE_PIN_MEMORY=1   启用 pinned memory（否则报 UVA is not available）
+#   --gpu-memory-utilization 0.7    8GB 显卡避免和桌面/浏览器抢显存
+VLLM_WSL2_ENABLE_PIN_MEMORY=1 vllm serve openai/whisper-large-v3-turbo \
+    --port 8000 --gpu-memory-utilization 0.7
+
+# T2: 翻译服务（可选，CPU 即可；官方 GGUF + llama-server，一条命令）
+#     首次自动下载 Q4_K_M 量化模型 ~1.1GB
+llama-server -hf tencent/Hy-MT2-1.8B-GGUF:Q4_K_M --port 8001 -c 4096
 
 # T3: 桥接后端
 cd server

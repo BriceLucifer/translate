@@ -13,6 +13,9 @@ import sys
 
 import websockets
 
+# Windows 控制台默认 GBK，避免中文/特殊符号打印崩溃或丢输出
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 CHUNK_SECONDS = 0.25
 CHUNK_BYTES = int(16000 * CHUNK_SECONDS) * 2  # int16
 
