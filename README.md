@@ -52,9 +52,12 @@ vllm serve openai/whisper-large-v3-turbo --port 8000
 VLLM_WSL2_ENABLE_PIN_MEMORY=1 vllm serve openai/whisper-large-v3-turbo \
     --port 8000 --gpu-memory-utilization 0.7
 
-# T2: 翻译服务（可选，CPU 即可；官方 GGUF + llama-server，一条命令）
+# T2: 翻译服务（可选；官方 GGUF + llama-server，一条命令）
 #     首次自动下载 Q4_K_M 量化模型 ~1.1GB
 llama-server -hf tencent/Hy-MT2-1.8B-GGUF:Q4_K_M --port 8001 -c 4096
+#     有 GPU 时加 -ngl 99 全量 offload（翻译延迟 ~1s -> ~0.2s，实时字幕强烈建议）
+#     Windows 用 win-cuda 预编译包；注意给 Whisper 留显存（vLLM 侧 --gpu-memory-utilization 0.5）
+llama-server -hf tencent/Hy-MT2-1.8B-GGUF:Q4_K_M --port 8001 -c 4096 -ngl 99
 
 # T3: 桥接后端
 cd server
