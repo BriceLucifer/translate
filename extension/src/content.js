@@ -34,13 +34,14 @@ function ensureOverlay() {
   });
   overlay.appendChild(grip);
 
-  transEl = document.createElement('div');
-  transEl.className = 'ls-line ls-trans';
   origEl = document.createElement('div');
   origEl.className = 'ls-line ls-orig';
+  transEl = document.createElement('div');
+  transEl.className = 'ls-line ls-trans';
 
-  overlay.appendChild(transEl);
+  // 上行原文（英语），下行译文（中文）
   overlay.appendChild(origEl);
+  overlay.appendChild(transEl);
   document.documentElement.appendChild(overlay);
 
   // 全屏时把浮层挂到全屏元素内（否则被 Top Layer 盖住）

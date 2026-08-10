@@ -19,12 +19,13 @@
   word-break: break-word;
 }
 
-/* 译文：主字幕，大字号 */
+/* 译文（下行）：主字幕，大字号 */
 #live-subtitles-overlay .ls-trans {
   font-size: 26px;
   font-weight: 600;
   color: #fff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  margin-top: 2px;
 }
 
 /* 拖拽手柄 */
@@ -49,11 +50,10 @@
   cursor: grabbing;
 }
 
-/* 原文：副字幕，小字号 */
+/* 原文（上行）：副字幕，小字号 */
 #live-subtitles-overlay .ls-orig {
   font-size: 17px;
   color: rgba(255, 255, 255, 0.82);
-  margin-top: 2px;
 }
 
 /* 临时（未确认）文本用斜体区分 */

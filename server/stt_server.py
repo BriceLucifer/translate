@@ -195,7 +195,7 @@ class Session:
             self.enqueue(final=False)
 
 
-async def handler(ws, http, vllm_url, model, mt_url, mt_model):
+async def handler(ws, http, vllm_url, model, mt_url, mt_model, default_target):
     session = Session(ws, http, vllm_url, model, mt_url, mt_model)
     log.info("client connected: %s", ws.remote_address)
     try:
@@ -206,7 +206,9 @@ async def handler(ws, http, vllm_url, model, mt_url, mt_model):
                 cfg = json.loads(msg)
                 if cfg.get("event") == "start":
                     session.language = cfg.get("language") or None
-                    session.target = cfg.get("target") or None
+                    # 客户端没传 target（旧版扩展）时按服务端默认；显式传 "" 表示不翻译
+                    t = cfg.get("target")
+                    session.target = (t or None) if t is not None else default_target
                     log.info("session start, language=%s target=%s",
                              session.language, session.target)
                 elif cfg.get("event") == "stop":
@@ -227,11 +229,13 @@ async def main():
     parser.add_argument("--model", default="openai/whisper-large-v3-turbo")
     parser.add_argument("--mt-url", default="", help="vLLM 翻译服务地址，留空关闭翻译")
     parser.add_argument("--mt-model", default="tencent/Hy-MT2-1.8B")
+    parser.add_argument("--default-target", default="zh", help="客户端未指定翻译目标时的默认语言")
     args = parser.parse_args()
 
     http = httpx.AsyncClient(timeout=httpx.Timeout(60.0))
     async with websockets.serve(
-        lambda ws: handler(ws, http, args.vllm, args.model, args.mt_url, args.mt_model),
+        lambda ws: handler(ws, http, args.vllm, args.model, args.mt_url, args.mt_model,
+                           args.default_target),
         "127.0.0.1", args.port, max_size=8 * 1024 * 1024,
     ):
         log.info("STT WebSocket server on ws://127.0.0.1:%d -> %s (model=%s)",
