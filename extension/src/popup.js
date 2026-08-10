@@ -12,8 +12,8 @@ function refresh() {
 }
 
 chrome.storage.local.get(['language', 'target', 'backendStatus'], (s) => {
-  langSel.value = s.language || '';
-  targetSel.value = s.target || '';
+  if (s.language !== undefined) langSel.value = s.language;
+  if (s.target !== undefined) targetSel.value = s.target;
   setStatus(s.backendStatus);
 });
 
