@@ -32,10 +32,10 @@ BYTES_PER_SAMPLE = 2
 
 # 切块策略参数（秒）
 MIN_SPEECH = 0.5          # 短于此的语音段忽略
-SILENCE_END = 0.7         # 句尾静音达到此时长即提交
-MAX_UNCOMMITTED = 10.0    # 未提交音频上限，超出强制切块
-PARTIAL_EVERY = 1.0       # 每积累这么多新语音刷新一次临时字幕
-PARTIAL_MAX = 8.0         # 临时字幕最多回看这么长的音频
+MAX_UNCOMMITTED = 10.0    # 未提交音频上限（也是转写窗口），超出强制提交
+PARTIAL_EVERY = 1.0       # 每积累这么多新语音刷新一次
+COMMIT_MARGIN = 0.5       # segment 结尾距窗口尾超过该值即视为成熟，可提交
+FORCE_MARGIN = 0.2        # 强制提交时的边距
 
 LANG_NAMES = {"zh": "中文", "en": "英语", "ja": "日语", "ko": "韩语"}
 
@@ -55,20 +55,6 @@ def to_wav_bytes(samples: np.ndarray) -> bytes:
     return out.getvalue()
 
 
-def trailing_silence_seconds(samples: np.ndarray) -> float:
-    """从尾部向前统计连续静音时长（RMS 阈值法，30ms 帧）。"""
-    frame = int(SAMPLE_RATE * 0.03)
-    if len(samples) < frame:
-        return 0.0
-    silent = 0
-    for i in range(len(samples) - frame, -1, -frame):
-        rms = float(np.sqrt(np.mean(samples[i:i + frame] ** 2)))
-        if rms > 0.01:
-            break
-        silent += frame
-    return silent / SAMPLE_RATE
-
-
 class Session:
     def __init__(self, ws, http: httpx.AsyncClient, vllm_url: str, model: str,
                  mt_url: str, mt_model: str):
@@ -85,6 +71,7 @@ class Session:
         self.committed_tr = ""          # 已确认译文
         self.partial = ""
         self.new_audio_since_partial = 0.0
+        self.flush_all = False          # stop 时提交全部
         self.task: asyncio.Task | None = None
         self.lock = asyncio.Lock()
         self.pending_final = False
@@ -99,8 +86,8 @@ class Session:
             msg["committed_tr"] = self.committed_tr
         await self.ws.send(json.dumps(msg, ensure_ascii=False))
 
-    async def transcribe(self, samples: np.ndarray) -> str:
-        data = {"model": self.model, "response_format": "json", "temperature": "0"}
+    async def transcribe(self, samples: np.ndarray) -> dict:
+        data = {"model": self.model, "response_format": "verbose_json", "temperature": "0"}
         if self.language:
             data["language"] = self.language
         files = {"file": ("audio.wav", to_wav_bytes(samples), "audio/wav")}
@@ -108,7 +95,7 @@ class Session:
             f"{self.vllm_url}/v1/audio/transcriptions", data=data, files=files
         )
         resp.raise_for_status()
-        return resp.json().get("text", "").strip()
+        return resp.json()
 
     async def translate(self, text: str) -> str:
         """调用 vLLM 起的翻译模型（OpenAI chat completions 兼容）。"""
@@ -149,22 +136,39 @@ class Session:
             except Exception as e:
                 log.warning("transcribe failed: %s", e)
 
-    async def _step(self, final: bool):
-        buf = bytes(self.buffer)
-        samples = pcm_bytes_to_float(buf)
-        if len(samples) < SAMPLE_RATE * MIN_SPEECH:
+    async def _step(self, force: bool):
+        """按 Whisper segment 时间戳断句：成熟 segment 提交，其余作临时字幕。"""
+        dur = len(self.buffer) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
+        if dur < MIN_SPEECH:
+            return
+        window = min(dur, MAX_UNCOMMITTED)
+        samples = pcm_bytes_to_float(bytes(self.buffer[: int(window * SAMPLE_RATE * 2)]))
+        data = await self.transcribe(samples)
+        segs = data.get("segments") or []
+
+        if not segs:
+            # 无语音（静音/纯噪声）：丢掉旧音频只留 1 秒上下文
+            if dur > 4.0:
+                del self.buffer[: int((dur - 1.0) * SAMPLE_RATE * 2)]
+            self.partial = ""
+            await self.send_subtitle()
             return
 
-        if final:
-            # 去掉句尾静音再转写
-            silence = trailing_silence_seconds(samples)
-            keep = len(samples) - int(silence * SAMPLE_RATE)
-            if keep < SAMPLE_RATE * MIN_SPEECH:
-                self.buffer.clear()
-                self.partial = ""
-                await self.send_subtitle()
-                return
-            text = await self.transcribe(samples[:keep])
+        cutoff = window if self.flush_all else window - (FORCE_MARGIN if force else COMMIT_MARGIN)
+        commit = [s for s in segs if s.get("end", 0) <= cutoff]
+        rest = segs[len(commit):]
+        if not commit and force:
+            # 强制提交：至少把最旧的 segment 结掉，防止缓冲无限增长
+            if len(segs) >= 2:
+                commit, rest = segs[:-1], segs[-1:]
+            else:
+                commit, rest = segs[:1], []
+
+        if commit:
+            text = " ".join(s.get("text", "").strip() for s in commit).strip()
+            end = min(commit[-1].get("end", 0), window)
+            n = int(end * SAMPLE_RATE * 2)
+            del self.buffer[: n - n % 2]
             if text:
                 self.committed = (self.committed + " " + text).strip() if self.committed else text
                 try:
@@ -174,32 +178,21 @@ class Session:
                     tr = ""
                 if tr:
                     self.committed_tr = (self.committed_tr + " " + tr).strip() if self.committed_tr else tr
-            self.buffer.clear()
-            self.partial = ""
-            self.new_audio_since_partial = 0.0
             log.info("COMMIT: %s", text)
-        else:
-            tail = samples[-int(PARTIAL_MAX * SAMPLE_RATE):]
-            self.partial = await self.transcribe(tail)
-            self.new_audio_since_partial = 0.0
-            log.info("partial: %s", self.partial)
+
+        self.partial = " ".join(s.get("text", "").strip() for s in rest).strip()
+        self.new_audio_since_partial = 0.0
         await self.send_subtitle()
 
     async def feed(self, chunk: bytes):
         self.buffer.extend(chunk)
-        dur = len(chunk) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
-        samples = pcm_bytes_to_float(bytes(self.buffer))
-        total = len(samples) / SAMPLE_RATE
+        self.new_audio_since_partial += len(chunk) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
+        total = len(self.buffer) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
 
-        # 句尾静音 -> 提交；未提交过长 -> 强制提交
-        if trailing_silence_seconds(samples) >= SILENCE_END:
+        if total >= MAX_UNCOMMITTED + 1.0:
             self.enqueue(final=True)
-        elif total >= MAX_UNCOMMITTED:
-            self.enqueue(final=True)
-        else:
-            self.new_audio_since_partial += dur
-            if self.new_audio_since_partial >= PARTIAL_EVERY and total >= MIN_SPEECH:
-                self.enqueue(final=False)
+        elif self.new_audio_since_partial >= PARTIAL_EVERY and total >= MIN_SPEECH:
+            self.enqueue(final=False)
 
 
 async def handler(ws, http, vllm_url, model, mt_url, mt_model):
@@ -217,6 +210,7 @@ async def handler(ws, http, vllm_url, model, mt_url, mt_model):
                     log.info("session start, language=%s target=%s",
                              session.language, session.target)
                 elif cfg.get("event") == "stop":
+                    session.flush_all = True
                     session.enqueue(final=True)
     except websockets.ConnectionClosed:
         pass

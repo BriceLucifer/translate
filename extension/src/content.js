@@ -11,6 +11,29 @@ function ensureOverlay() {
   overlay.id = OVERLAY_ID;
   overlay.style.display = 'none';
 
+  // 拖拽手柄（浮层本身不拦截点击，只能拖这里移动）
+  const grip = document.createElement('div');
+  grip.className = 'ls-grip';
+  grip.textContent = '⠿';
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const rect = overlay.getBoundingClientRect();
+    const dx = e.clientX - rect.left;
+    const dy = e.clientY - rect.top;
+    overlay.style.left = rect.left + 'px';
+    overlay.style.top = rect.top + 'px';
+    overlay.style.bottom = 'auto';
+    overlay.style.transform = 'none';
+    const move = (ev) => {
+      overlay.style.left = Math.max(0, ev.clientX - dx) + 'px';
+      overlay.style.top = Math.max(0, ev.clientY - dy) + 'px';
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', () => grip.removeEventListener('pointermove', move), { once: true });
+  });
+  overlay.appendChild(grip);
+
   transEl = document.createElement('div');
   transEl.className = 'ls-line ls-trans';
   origEl = document.createElement('div');

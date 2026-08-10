@@ -11,9 +11,12 @@ function refresh() {
   langSel.disabled = targetSel.disabled = capturing;
 }
 
-chrome.storage.local.get(['language', 'target', 'backendStatus'], (s) => {
-  if (s.language !== undefined) langSel.value = s.language;
-  if (s.target !== undefined) targetSel.value = s.target;
+chrome.storage.local.get(['language', 'target', 'prefsV2', 'backendStatus'], (s) => {
+  // 旧版本可能存过空 target（不翻译），prefsV2 之前一律用 HTML 默认值（自动检测 -> 中文）
+  if (s.prefsV2) {
+    if (s.language !== undefined) langSel.value = s.language;
+    if (s.target !== undefined) targetSel.value = s.target;
+  }
   setStatus(s.backendStatus);
 });
 
@@ -43,7 +46,7 @@ toggleBtn.addEventListener('click', () => {
   } else {
     const language = langSel.value;
     const target = targetSel.value;
-    chrome.storage.local.set({ language, target });
+    chrome.storage.local.set({ language, target, prefsV2: true });
     chrome.runtime.sendMessage({ type: 'start', language, target }, (res) => {
       if (res && res.ok) {
         capturing = true;
